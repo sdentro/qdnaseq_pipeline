@@ -20,6 +20,8 @@ if (length(args) > 5) {
 	sex = NULL
 }
 correctReplication = F
+segmentation_gamma = 10
+segmentation_kmin = 3
 
 load("precalculated_windows/QNDAseq_bins50.RData")
 #readCounts_tumour <- binReadCounts(bins, bamfiles=tumourbam)
@@ -99,10 +101,31 @@ normaliseReadCounts = function(readCounts_tumour, readCounts_normal, sample_inde
 	return(res)
 }
 
+segmentBinsPCF = function(copyNumbersSmooth, segmentation_gamma, segmentation_kmin) {
+  condition = QDNAseq:::binsToUse(copyNumbersSmooth)	
+  logr = log2(assayDataElement(copyNumbersSmooth, "copynumber")[condition,1])
+  
+  chroms = unique(fData(copyNumbersSmooth)$chromosome)
+  
+  logr_segm = c()
+  for (chrom in chroms) {
+    logr_chrom = logr[(fData(copyNumbersSmooth)$chromosome==chrom)[condition]]
+    sdev = Battenberg:::getMad(logr_chrom, k=25)
+    logr_segm = c(logr_segm, Battenberg:::selectFastPcf(logr_chrom, segmentation_kmin, segmentation_gamma*sdev, T)$yhat)
+  }
+  
+  temp = assayDataElement(copyNumbersSmooth, "copynumber")
+  temp[,1] = NA
+  temp[condition,1] = 2^logr_segm
+  assayDataElement(copyNumbersSmooth, "segmented") = temp
+  
+  return(copyNumbersSmooth)
+}
 
 normalisedCounts = normaliseReadCounts(readCounts_tumour, readCounts_normal)
 copyNumbersSmooth <- smoothOutlierBins(normalisedCounts)
-copyNumbersSegmented <- segmentBins(copyNumbersSmooth, transformFun="sqrt")
+# copyNumbersSegmented <- segmentBins(copyNumbersSmooth, transformFun="sqrt")
+copyNumbersSegmented = segmentBinsPCF(copyNumbersSmooth, segmentation_gamma=segmentation_gamma, segmentation_kmin=segmentation_kmin)
 copyNumbersSegmented <- normalizeSegmentedBins(copyNumbersSegmented)
 copyNumbersCalled <- callBins(copyNumbersSegmented)
 
