@@ -24,6 +24,11 @@ correctReplication = F
 segmentation_gamma = 10
 segmentation_kmin = 3
 
+# parameters for testing for copy number alterations
+logr_minimum_deviation = 0.01 # minimum logr has to deviate from 0 to be considered for significance testing
+max_num_bins_test = 500 # maximum number of bins a segment can contain before downsampling is done - for large numbers of bins a very small deviation will always be significant
+test_significance_threshold = 0.05 # significance threshold
+
 load("precalculated_windows/QNDAseq_bins15.RData")
 readCounts_tumour <- binReadCounts(bins, bamfiles=tumourbam)
 readCounts_normal <- binReadCounts(bins, bamfiles=normalbam)
@@ -166,9 +171,22 @@ get_segments = function(x) {
 	segment <- as.data.frame(.makeSegments(segmented, chrom))
 	
 	copynumber$segment_values = NA
+	# segmented$p_value_gain = NA
+	# segmented$p_value_loss = NA
 	for (i in seq_len(nrow(segment))) {
 	  copynumber$segment_values[segment$start[i]:segment$end[i]] = segment$values[i]
+	  # logr_values = log2(copynumber[segment$start[i]:segment$end[i], 1])
+	  # 
+	  # num_snps_sample = 500
+	  # offset = 0.01
+	  # 
+	  # copynumber$p_value_loss[i] = t.test(sample(logr_values, num_snps_sample), rnorm(n=num_snps_sample, mean=0-offset, sd=sd(logr_values)), alternative="less")$p.value
+	  # copynumber$p_value_gain[i] = t.test(sample(logr_values, num_snps_sample), rnorm(n=num_snps_sample, mean=0+offset, sd=sd(logr_values)), alternative="greater")$p.value
 	}
+	
+	# copynumber$p_value_gain_adj = p.adjust(copynumber$p_value_gain, method = "bonferroni")
+	# copynumber$p_value_loss_adj = p.adjust(copynumber$p_value_loss, method = "bonferroni")
+	
 
 	colnames(copynumber)[1] = "values"
 	copynumber$logr_values = QDNAseq:::log2adhoc(copynumber$values)
@@ -183,7 +201,7 @@ get_segments = function(x) {
 copynumber = get_segments(copyNumbersCalled)
 
 
-get_segmentation_df = function(copynumber) {
+get_segmentation_df = function(copynumber, max_num_bins_test, logr_minimum_deviation, test_significance_threshold) {
 	segments = rle(copynumber$segment_values)
 	segmentation = data.frame()
 	for (i in seq_along(segments$lengths)) {
@@ -201,14 +219,38 @@ get_segmentation_df = function(copynumber) {
 			curr_segment_end_index = segment_end_index[length(segment_end_index)]
 		}
 		
+	  # test for significance of gain and loss separately
+	  logr_values = log2(copynumber$values[curr_segment_start_index:curr_segment_end_index])
+	  num_snps_sample = ifelse(length(logr_values) > max_num_bins_test, num_snps_sample, length(logr_values))
+	  p_value_gain = t.test(sample(logr_values, num_snps_sample), rnorm(n=num_snps_sample, mean=0+logr_minimum_deviation, sd=sd(logr_values)), alternative="greater")$p.value
+	  p_value_loss = t.test(sample(logr_values, num_snps_sample), rnorm(n=num_snps_sample, mean=0-logr_minimum_deviation, sd=sd(logr_values)), alternative="less")$p.value
+	  
 		segmentation = rbind(segmentation, data.frame(chrom=copynumber$chrom[curr_segment_start_index],
-		start=copynumber$start[curr_segment_start_index], end=copynumber$end[curr_segment_end_index],
-		value=copynumber$segment_values[curr_segment_start_index], stringsAsFactors=F))
+                                              		start=copynumber$start[curr_segment_start_index], end=copynumber$end[curr_segment_end_index],
+                                              		value=copynumber$segment_values[curr_segment_start_index], 
+                                              		p_value_gain=p_value_gain,
+                                              		p_value_loss=p_value_loss, stringsAsFactors=F))
+	}
+	
+	# adjust for multiple testing
+	segmentation$p_value_gain_adj = p.adjust(segmentation$p_value_gain, method = "bonferroni")
+	segmentation$p_value_loss_adj = p.adjust(segmentation$p_value_loss, method = "bonferroni")
+	# classify segments
+	segmentation$classification = "normal"
+	is_gain = segmentation$p_value_gain_adj < test_significance_threshold
+	is_loss = segmentation$p_value_loss_adj < test_significance_threshold
+	segmentation$classification[is_gain] = "gain"
+	segmentation$classification[is_loss] = "loss"
+	# check that no segments are both a gain and a loss - this should never occur
+	if (any(is_gain & is_loss)) {
+	  segmentation$classification[is_gain & is_loss] = "error"
+	  print("Found segment(s) that is both gain and loss:")
+	  print(segmentation[is_gain & is_loss,])
 	}
 	segmentation$len = segmentation$end - segmentation$start
 	return(segmentation)
 }
-segmentation = get_segmentation_df(copynumber)
+segmentation = get_segmentation_df(copynumber, max_num_bins_test=max_num_bins_test, logr_minimum_deviation=logr_minimum_deviation, test_significance_threshold=test_significance_threshold)
 
 get_purity_estimates = function(segmentation, sex) {
 	segmentation$purity = NA
@@ -271,40 +313,49 @@ write.table(segmentation, file=paste0("output/", samplename, "/", samplename,"_s
 max_value = max(abs(copynumber$logr_values))
 if (max_value < 2) {
 	max_y = 2
+	signficance_bar_height = 0.01/3*2
 } else if (max_value < 3) {
 	max_y = 3
+	signficance_bar_height = 0.01
 } else {
 	max_y = 5
+	signficance_bar_height = 0.01/3*5
 }
 
-make_custom_plot = function(copynumber, max_y, plot_title=NULL, plot_subtitle=NULL) {
-background = data.frame(y=seq(max_y*(-1),max_y,1))
-p = ggplot(copynumber) +
-geom_hline(data=background, mapping=aes(yintercept=y), colour="black", alpha=0.3) +
-geom_point(mapping=aes(x=start, y=logr_values), alpha=0.5, size=0.9, colour="black") +
-geom_point(mapping=aes(x=start, y=segment_values), alpha=1, size=0.2, colour="red") +
-facet_grid(~chrom, scales="free_x", space = "free_x") +
-scale_x_continuous(expand=c(0, 0)) +
-ylim(-1*max_y,max_y) + ylab("log2 ratio") +
-theme_bw() + theme(axis.title.x=element_blank(),
-                  axis.text.x=element_blank(),
-                  axis.ticks.x=element_blank(),
-                  axis.text.y = element_text(colour="black",size=18,face="plain"),
-                  axis.title.y = element_text(colour="black",size=20,face="plain"),
-                  strip.text.x = element_text(colour="black",size=16,face="plain"),
-                  plot.title = element_text(colour="black",size=36,face="plain",hjust = 0.5))
-if (!is.null(plot_title) & !is.null(plot_subtitle)) {
-        p = p + ggtitle(bquote(atop(.(plot_title), atop(.(plot_subtitle), ""))))
-} else if (!is.null(plot_title)) {
-        p = p + ggtitle(plot_title)
-}
-return(p)
+make_custom_plot = function(copynumber, segmentation, max_y, plot_title=NULL, plot_subtitle=NULL, signficance_bar_height=0.01) {
+  background = data.frame(y=seq(max_y*(-1),max_y,1))
+  p = ggplot(copynumber) +
+  geom_hline(data=background, mapping=aes(yintercept=y), colour="black", alpha=0.3) +
+  geom_point(mapping=aes(x=start, y=logr_values), alpha=0.5, size=0.9, colour="black") +
+  geom_point(mapping=aes(x=start, y=segment_values), alpha=1, size=0.2, colour="red") +
+  facet_grid(~chrom, scales="free_x", space = "free_x") +
+  scale_x_continuous(expand=c(0, 0)) +
+  ylim(-1*max_y,max_y) + ylab("log2 ratio") +
+  theme_bw() + theme(axis.title.x=element_blank(),
+                    axis.text.x=element_blank(),
+                    axis.ticks.x=element_blank(),
+                    axis.text.y = element_text(colour="black",size=18,face="plain"),
+                    axis.title.y = element_text(colour="black",size=20,face="plain"),
+                    strip.text.x = element_text(colour="black",size=16,face="plain"),
+                    plot.title = element_text(colour="black",size=36,face="plain",hjust = 0.5))
+  if (any(segmentation$class=="loss")) {
+    p = p + geom_rect(data=segmentation[segmentation$class=="loss",], mapping=aes(xmin=start, xmax=end, ymin=-(max_y-signficance_bar_height), ymax=-(max_y)), fill="blue")
+  } else if (any(segmentation$class=="gain")) {
+    p = p + geom_rect(data=segmentation[segmentation$class=="gain",], mapping=aes(xmin=start, xmax=end, ymin=(max_y-signficance_bar_height), ymax=(max_y)), fill="red")
+  }
+  
+  if (!is.null(plot_title) & !is.null(plot_subtitle)) {
+          p = p + ggtitle(bquote(atop(.(plot_title), atop(.(plot_subtitle), ""))))
+  } else if (!is.null(plot_title)) {
+          p = p + ggtitle(plot_title)
+  }
+  return(p)
 }
 
 
 plot_title = dimnames(Biobase::assayDataElement(readCounts_tumour, "counts"))[[2]]
 plot_subtitle = paste0("Estimated purity: ", round(segmentation$overall_purity[1], 2), " Assumed ploidy: ", round(segmentation$assumed_ploidy, 2)) 
-p = make_custom_plot(copynumber, max_y=max_y, plot_title=plot_title, plot_subtitle=plot_subtitle)
+p = make_custom_plot(copynumber, segmentation, max_y=max_y, plot_title=plot_title, plot_subtitle=plot_subtitle, signficance_bar_height=signficance_bar_height)
 png(file.path("output/", samplename, paste0(samplename, "_qdnaseq.png")), height=500, width=2000)
 print(p)
 dev.off()
