@@ -334,14 +334,15 @@ write.table(segmentation, file=paste0("output/", samplename, "/", samplename,"_s
 max_value = max(abs(copynumber$logr_values))
 if (max_value < 2) {
   max_y = 2
-  signficance_bar_height = 0.01/3*2
+  signficance_bar_height = 0.05
 } else if (max_value < 3) {
   max_y = 3
-  signficance_bar_height = 0.01
+  signficance_bar_height = 0.05*1.5
 } else {
   max_y = 5
-  signficance_bar_height = 0.01/3*5
+  signficance_bar_height = 0.05*2.5
 }
+
 
 make_custom_plot = function(copynumber, segmentation, max_y, plot_title=NULL, plot_subtitle=NULL, signficance_bar_height=0.01) {
   background = data.frame(y=seq(max_y*(-1),max_y,1))
@@ -361,7 +362,8 @@ make_custom_plot = function(copynumber, segmentation, max_y, plot_title=NULL, pl
                        plot.title = element_text(colour="black",size=36,face="plain",hjust = 0.5))
   if (any(segmentation$class=="loss")) {
     p = p + geom_rect(data=segmentation[segmentation$class=="loss",], mapping=aes(xmin=start, xmax=end, ymin=-(max_y-signficance_bar_height), ymax=-(max_y)), fill="blue")
-  } else if (any(segmentation$class=="gain")) {
+  }
+  if (any(segmentation$class=="gain")) {
     p = p + geom_rect(data=segmentation[segmentation$class=="gain",], mapping=aes(xmin=start, xmax=end, ymin=(max_y-signficance_bar_height), ymax=(max_y)), fill="red")
   }
   
