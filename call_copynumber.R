@@ -221,7 +221,7 @@ get_segmentation_df = function(copynumber, max_num_bins_test, logr_minimum_devia
     
     # test for significance of gain and loss separately
     logr_values = log2(copynumber$values[curr_segment_start_index:curr_segment_end_index])
-    num_snps_sample = ifelse(length(logr_values) > max_num_bins_test, num_snps_sample, length(logr_values))
+    num_snps_sample = ifelse(length(logr_values) > max_num_bins_test, max_num_bins_test, length(logr_values))
     p_value_gain = t.test(sample(logr_values, num_snps_sample), rnorm(n=num_snps_sample, mean=0+logr_minimum_deviation, sd=sd(logr_values)), alternative="greater")$p.value
     p_value_loss = t.test(sample(logr_values, num_snps_sample), rnorm(n=num_snps_sample, mean=0-logr_minimum_deviation, sd=sd(logr_values)), alternative="less")$p.value
     
