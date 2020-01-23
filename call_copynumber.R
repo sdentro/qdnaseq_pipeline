@@ -21,15 +21,15 @@ if (length(args) > 4) {
 sex = "female"
 
 correctReplication = F
-segmentation_gamma = 10
+segmentation_gamma = 30
 segmentation_kmin = 3
 
 # parameters for testing for copy number alterations
-logr_minimum_deviation = 0.01 # minimum logr has to deviate from 0 to be considered for significance testing
+logr_minimum_deviation = 0.05 # minimum logr has to deviate from 0 to be considered for significance testing
 max_num_bins_test = 500 # maximum number of bins a segment can contain before downsampling is done - for large numbers of bins a very small deviation will always be significant
 test_significance_threshold = 0.05 # significance threshold
 
-load("precalculated_windows/QNDAseq_bins15.RData")
+load("precalculated_windows/QNDAseq_bins50.RData")
 readCounts_tumour <- binReadCounts(bins, bamfiles=tumourbam)
 readCounts_normal <- binReadCounts(bins, bamfiles=normalbam)
 
@@ -108,15 +108,15 @@ segmentBinsPCF = function(copyNumbersSmooth, segmentation_gamma, segmentation_km
 
 normalisedCounts = normaliseReadCounts(readCounts_tumour, readCounts_normal)
 copyNumbersSmooth <- smoothOutlierBins(normalisedCounts)
-copyNumbersSegmented <- segmentBins(copyNumbersSmooth, transformFun="sqrt")
-# copyNumbersSegmented = segmentBinsPCF(copyNumbersSmooth, segmentation_gamma=segmentation_gamma, segmentation_kmin=segmentation_kmin)
+# copyNumbersSegmented <- segmentBins(copyNumbersSmooth, transformFun="sqrt")
+copyNumbersSegmented = segmentBinsPCF(copyNumbersSmooth, segmentation_gamma=segmentation_gamma, segmentation_kmin=segmentation_kmin)
 copyNumbersSegmented <- normalizeSegmentedBins(copyNumbersSegmented)
 copyNumbersCalled <- callBins(copyNumbersSegmented)
 
-# make result figure
-png(paste0("output/", samplename, "/", samplename, "_figure.png"), width=1000, height=400)
-plot(copyNumbersCalled)
-dev.off()
+# make result figure of adapted QDNAseq output
+#png(paste0("output/", samplename, "/", samplename, "_figure.png"), width=1000, height=400)
+#plot(copyNumbersCalled)
+#dev.off()
 
 ###############################################################################################
 # make raw data figures
@@ -302,7 +302,9 @@ get_purity_estimates = function(segmentation, sex) {
     segmentation$purity[i] <- get_purity(segmentation$value[i], 1, normal_ploidy)
   }
   
-  segmentation$overall_purity = get_purity(segmentation$value, segmentation$len, normal_ploidy)
+  # Experimental fitting procedure is disabled for now
+  #segmentation$overall_purity = get_purity(segmentation$value, segmentation$len, normal_ploidy)
+  segmentation$overall_purity = 1
   segmentation$assumed_ploidy = normal_ploidy
   segmentation$len = segmentation$len/1000000
   return(segmentation)
@@ -356,9 +358,10 @@ make_custom_plot = function(copynumber, segmentation, max_y, plot_title=NULL, pl
 
 
 plot_title = dimnames(Biobase::assayDataElement(readCounts_tumour, "counts"))[[2]]
-plot_subtitle = paste0("Estimated purity: ", round(segmentation$overall_purity[1], 2), " Assumed ploidy: ", round(segmentation$assumed_ploidy, 2)) 
+#plot_subtitle = paste0("Estimated purity: ", round(segmentation$overall_purity[1], 2), " Assumed ploidy: ", round(segmentation$assumed_ploidy, 2)) 
+plot_subtitle = NULL
 p = make_custom_plot(copynumber, segmentation, max_y=max_y, plot_title=plot_title, plot_subtitle=plot_subtitle, signficance_bar_height=signficance_bar_height)
-png(file.path("output/", samplename, paste0(samplename, "_qdnaseq.png")), height=500, width=2000)
+png(file.path("output/", samplename, paste0(samplename, "_final_profile.png")), height=500, width=2000)
 print(p)
 dev.off()
 
