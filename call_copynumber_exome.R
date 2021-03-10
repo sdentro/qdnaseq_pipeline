@@ -33,7 +33,7 @@ load("precalculated_windows/QNDAseq_bins10.RData")
 #readCounts_normal <- binReadCounts(bins, bamfiles=normalbam)
 
 # remove target regions (i.e. only use offtarget reads)
-target = read.table(targetregions, header=T, stringsAsFactors=F, sep="\t")
+target = read.table(targetregions, header=T, stringsAsFactors=F, sep="\t")[,1:4]
 colnames(target)[1:4] = c("chromosome", "start", "end", "gene")
 target$start = target$start #-1000
 target$end = target$end #+1000
@@ -67,6 +67,7 @@ if (sex=="female") {
 	readCounts_normal = new('QDNAseqReadCounts', bins=bins[bins$chromosome!="Y",,drop=F], counts=assayDataElement(readCounts_normal, "counts")[bins$chromosome!="Y",,drop=F], phenodata=phenoData(readCounts_normal))
 }
 
+if (F) {
 # make a plot of raw coverage of control
 #save.image("debug.RData")
 temp = data.frame(counts=Biobase::assayDataElement(readCounts_normal, "counts")[,1])
@@ -89,6 +90,7 @@ print(paste0("Removing bins with excessive control sample counts: ", sum(!sel), 
 bins_to_keep = which(sel)
 readCounts_tumour = new('QDNAseqReadCounts', bins=bins[bins_to_keep,,drop=F], counts=assayDataElement(readCounts_tumour, "counts")[bins_to_keep,,drop=F], phenodata=phenoData(readCounts_tumour))
 readCounts_normal = new('QDNAseqReadCounts', bins=bins[bins_to_keep,,drop=F], counts=assayDataElement(readCounts_normal, "counts")[bins_to_keep,,drop=F], phenodata=phenoData(readCounts_normal))
+}
 
 normaliseReadCounts = function(readCounts_tumour, readCounts_normal, sample_index=1, minReadsThreshold=10, correctReplication=F) {
 	tumour_counts = assayDataElement(readCounts_tumour, "counts")[,sample_index]
