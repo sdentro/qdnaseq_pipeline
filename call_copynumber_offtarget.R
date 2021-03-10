@@ -24,11 +24,12 @@ segmentation_gamma = 10
 segmentation_kmin = 3
 
 # parameters for testing for copy number alterations
-logr_minimum_deviation = 0.01 # minimum logr has to deviate from 0 to be considered for significance testing
+logr_minimum_deviation = 0.025 # minimum logr has to deviate from 0 to be considered for significance testing
 max_num_bins_test = 500 # maximum number of bins a segment can contain before downsampling is done - for large numbers of bins a very small deviation will always be significant
 test_significance_threshold = 0.05 # significance threshold
+segm_summary_method = 2 # 1 = mean, 2 = median
 
-load("precalculated_windows/QNDAseq_bins50.RData")
+load("precalculated_windows/QNDAseq_bins100.RData")
 #readCounts_tumour <- binReadCounts(bins, bamfiles=tumourbam)
 #readCounts_normal <- binReadCounts(bins, bamfiles=normalbam)
 
@@ -106,7 +107,21 @@ normaliseReadCounts = function(readCounts_tumour, readCounts_normal, sample_inde
 	return(res)
 }
 
-segmentBinsPCF = function(copyNumbersSmooth, segmentation_gamma, segmentation_kmin) {
+get_median_logr = function(segmentation, logr_chrom) {
+	logr_segm_chrom = rep(NA, length(logr_chrom))
+
+	segs = rle(segmentation$yhat)
+	for (i in 1:length(segs$lengths)) {
+	    end = cumsum(segs$lengths[1:i])
+	    end = end[length(end)]
+	    start = (end-segs$lengths[i]) + 1 # segs$lengths contains end points
+	    logr_segm_chrom[start:end] = median(logr_chrom[start:end])
+	}
+	return(logr_segm_chrom)
+}
+
+
+segmentBinsPCF = function(copyNumbersSmooth, segmentation_gamma, segmentation_kmin, segm_summary_method=1) {
   condition = QDNAseq:::binsToUse(copyNumbersSmooth)	
   logr = log2(assayDataElement(copyNumbersSmooth, "copynumber")[condition,1])
   
@@ -116,7 +131,15 @@ segmentBinsPCF = function(copyNumbersSmooth, segmentation_gamma, segmentation_km
   for (chrom in chroms) {
     logr_chrom = logr[(fData(copyNumbersSmooth)$chromosome==chrom)[condition]]
     sdev = Battenberg:::getMad(logr_chrom, k=25)
-    logr_segm = c(logr_segm, Battenberg:::selectFastPcf(logr_chrom, segmentation_kmin, segmentation_gamma*sdev, T)$yhat)
+    chrom_segm = Battenberg:::selectFastPcf(logr_chrom, segmentation_kmin, segmentation_gamma*sdev, T)
+
+    if (segm_summary_method==1) { # take the mean
+	logr_segm = c(logr_segm, chrom_segm$yhat)
+    } else if (segm_summary_method==2) { # take the median
+	logr_segm = c(logr_segm, get_median_logr(chrom_segm, logr_chrom))
+    } else {
+	print("Unknown segmentation segment summary method supplied")
+    }
   }
   
   temp = assayDataElement(copyNumbersSmooth, "copynumber")
@@ -130,7 +153,7 @@ segmentBinsPCF = function(copyNumbersSmooth, segmentation_gamma, segmentation_km
 normalisedCounts = normaliseReadCounts(readCounts_tumour, readCounts_normal)
 copyNumbersSmooth <- smoothOutlierBins(normalisedCounts)
 # copyNumbersSegmented <- segmentBins(copyNumbersSmooth, transformFun="sqrt")
-copyNumbersSegmented = segmentBinsPCF(copyNumbersSmooth, segmentation_gamma=segmentation_gamma, segmentation_kmin=segmentation_kmin)
+copyNumbersSegmented = segmentBinsPCF(copyNumbersSmooth, segmentation_gamma=segmentation_gamma, segmentation_kmin=segmentation_kmin, segm_summary_method=segm_summary_method)
 copyNumbersSegmented <- normalizeSegmentedBins(copyNumbersSegmented)
 copyNumbersCalled <- callBins(copyNumbersSegmented)
 
@@ -291,7 +314,7 @@ get_purity_estimates = function(segmentation, sex) {
   } else {
     normal_ploidy = sum(c(chrom_lengths$len[1:20]/1000*2) / sum(chrom_lengths$len / 1000))
   }
-  
+ normal_ploidy = 2 
   # helper functions
   mytransform <- function(x,rho,phi) (phi*2^x-2*(1-rho))/rho
   geterrors <- function(rho,phi,meansSeg,weights, sds) {
