@@ -1,4 +1,4 @@
-# This pipeline is the default QDNAseq, which does not use the matched normal
+# This pipeline runs on shallow whole genome sequencing
 
 library(QDNAseq)
 library(Biobase)
